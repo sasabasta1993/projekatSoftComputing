@@ -74,7 +74,7 @@ def display_image(image,title, color= False):
 
 
 def dilate(image):
-    kernel = np.ones((22,22)) # strukturni element 3x3 blok
+    kernel = np.ones((8,8)) # strukturni element 3x3 blok
     return cv2.dilate(image, kernel, iterations=10)
 
 
@@ -109,7 +109,8 @@ def convert_output(outputs):
 
 def winner(output):
     return max(enumerate(output), key=lambda x: x[1])[0]
-
+    
+# TODO - ROI3
 def select_roi3(image_orig, image_bin):
     '''Oznaciti regione od interesa na originalnoj slici. (ROI = regions of interest)
         Za svaki region napraviti posebnu sliku dimenzija 28 x 28. 
@@ -126,12 +127,41 @@ def select_roi3(image_orig, image_bin):
 
     
     list_contours=[]
+    regions_color=[]
+    
     
     maxArea=0
         
     for contour in contours:
         if(cv2.contourArea(contour)>maxArea):
             maxArea=cv2.contourArea(contour)
+            
+#    contours = []
+#    contour_angles = []
+#    contour_centers = []
+#    contour_sizes = []
+#    for contour in contours:
+#        center, size, angle = cv2.minAreaRect(contour)
+#        xt,yt,h,w = cv2.boundingRect(contour)
+#
+#        region_points = []
+#        for i in range (xt,xt+h):
+#            for j in range(yt,yt+w):
+#                dist = cv2.pointPolygonTest(contour,(i,j),False)
+#                if dist>=0 and image_bin[j,i]==255: # da li se tacka nalazi unutar konture?
+#                    region_points.append([i,j])
+#        contour_centers.append(center)
+#        contour_angles.append(angle)
+#        contour_sizes.append(size)
+#        contours.append(region_points)
+#    
+#    # postavljanje kontura u vertikalan polozaj
+#    contours = rotate_regions(contours, contour_angles, contour_centers, contour_sizes)
+    #display_image(contours[0])
+    for contour in contours:
+#        display_image(contour)
+        center, size, angle = cv2.minAreaRect(contour)
+        xt,yt,h,w = cv2.boundingRect(contour)
     
     for contour in contours: 
         x,y,w,h = cv2.boundingRect(contour) #koordinate i velicina granicnog pravougaonika
@@ -145,7 +175,11 @@ def select_roi3(image_orig, image_bin):
             
             #x,y,h,w = cv2.boundingRect(contour)
             region = image_bin[y:y+h+1,x:x+w+1]
-            regions_dic[x] = resize_region(region) 
+            region_color = image_orig[y:y+h+1,x:x+w+1];
+            regions_color.append(region_color)
+            #regions_dic[x] = resize_region(region)
+            regions_dic[x] = [resize_region(region), (x,y,w,h)]
+
             cv2.rectangle(image_orig,(x,y),(x+w,y+h),(255,255,0),5)
             list_contours.append(contour)
             #cv2.rectangle(image_orig,(x,y),(x+w,y+h),(0,255,0),5)
@@ -170,8 +204,9 @@ def select_roi3(image_orig, image_bin):
     
     sorted_regions_dic = collections.OrderedDict(sorted(regions_dic.items()))
     sorted_regions = sorted_regions_dic.values()
+    sorted_regions = np.array(sorted_regions_dic.values())
     # sortirati sve regione po x osi (sa leva na desno) i smestiti u promenljivu sorted_regions
-    return image_orig, sorted_regions
+    return image_orig, sorted_regions[:,0], regions_color
 
 
 def rotate_regions(contours,angles,centers,sizes):
@@ -688,10 +723,59 @@ def select_roi2(image_orig, image_bin):
     sorted_regions = np.array(sorted_regions_dict.values())
     
     return image_orig, sorted_regions[:, 0]
+    
+# TODO - NEURAL NETWORK
+# TODO - create_ann
+def create_ann():
+    
+    ann = Sequential()
+    # Postavljanje slojeva neurona mreže 'ann'
+    ann.add(Dense(input_dim=6400, output_dim=128,init="glorot_uniform"))
+    ann.add(Activation("sigmoid"))
+    ann.add(Dense(input_dim=128, output_dim=6,init="glorot_uniform"))
+    ann.add(Activation("sigmoid"))
+    return ann
+   
+# TODO - train_ann
+def train_ann(ann, X_train, y_train):
+    X_train = np.array(X_train, np.float32)
+    y_train = np.array(y_train, np.float32)
+   
+    # definisanje parametra algoritma za obucavanje
+    sgd = SGD(lr=0.001, momentum=0.9)
+    ann.compile(loss='mean_squared_error', optimizer=sgd)
+
+    # obucavanje neuronske mreze  nb_epoch=500
+    ann.fit(X_train, y_train, nb_epoch=2000, batch_size=1, verbose = 0, shuffle=False, show_accuracy = False) 
+      
+    return ann
+
+# TODO - display_result
+def display_result_ann(outputs, alphabet):
+    print '\n>>>display_result_ann'
+    '''
+    Funkcija određuje koja od grupa predstavlja razmak između reči, a koja između slova, i na osnovu
+    toga formira string od elemenata pronađenih sa slike.
+    Args:
+        outputs: niz izlaza iz neuronske mreže.
+        alphabet: niz karaktera koje je potrebno prepoznati
+        kmeans: obučen kmeans objekat
+    Return:
+        Vraća formatiran string
+    '''
+    result = alphabet[winner(outputs[0])]
+    for idx, output in enumerate(outputs[1:,:]):
+        # Iterativno dodavati prepoznate elemente kao u vežbi 2, alphabet[winner(output)]
+
+        result += alphabet[winner(output)]
+        result += ' i '
+    return result
+
+    
 #######################################################################################   
     
             
-image_test_original = load_image("C:\Users\sbstb\Desktop\image.jpg")
+image_test_original = load_image('C:\Users\sbstb\Desktop\stopSign6.jpg')
 
 width,height= image_test_original.shape[0:2]
 
@@ -729,12 +813,18 @@ image_test_hsv=image_test_original.copy()
 
 hsv = cv2.cvtColor(image_test_hsv, cv2.COLOR_BGR2HSV)
 
+
+
     # define range of blue color in HSV
 lower_blue = np.array([110,50,50])
 upper_blue = np.array([130,255,255])
 
     # Threshold the HSV image to get only red colors
-mask = cv2.inRange(hsv, lower_blue, upper_blue)
+mask1 = cv2.inRange(hsv, lower_blue, upper_blue)
+mask2 = cv2.inRange(hsv_black,lower_black,upper_black)
+
+mask= mask1
+
 
     # Bitwise-AND mask and original image
 res = cv2.bitwise_and(image_test_hsv,image_test_hsv, mask= mask)
@@ -752,11 +842,8 @@ hsv_red = cv2.cvtColor(red,cv2.COLOR_BGR2HSV)
 #print hsv_red
 
 
-selected_regions, letters=select_roi3(image_test_original.copy(),mask)
+selected_regions, letters, colorRegions=select_roi3(image_test_original.copy(),mask)
 
-#print "distancesssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
-#print len(distances)
-#print len(letters[0])
 
 
 print 
@@ -775,36 +862,108 @@ for letter in letters:
     j+=1
 
 shape=0
-#matchShapes(shape)
-#im = cv2.imread("test3.jpg", cv2.IMREAD_GRAYSCALE)
-# 
-#params = cv2.SimpleBlobDetector_Params()
-#
-## Filter by Area.
-#params.filterByArea = True
-#params.minArea = 4000
-# 
-## Filter by Circularity
-#params.filterByCircularity = True
-#params.minCircularity = 0.5
-# 
-## Filter by Convexity
-#params.filterByConvexity = True
-#params.minConvexity = 0.1
-# 
-## Filter by Inertia
-##params.filterByInertia = True
-##params.minInertiaRatio = 0.01 
-## Set up the detector with default parameters.
-#detector = cv2.SimpleBlobDetector_create(params)
-# 
-## Detect blobs.
-#keypoints = detector.detect(im)
-# 
-## Draw detected blobs as red circles.
-## cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS ensures the size of the circle corresponds to the size of blob
-#im_with_keypoints = cv2.drawKeypoints(im, keypoints, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-# 
-## Show keypoints
-#cv2.imshow("Keypoints", im_with_keypoints)
-#cv2.waitKey(0)
+
+# /-/-/-/-
+#selected_test_obucavanje, signs_obucavanje, region_distances_obucavanje, regions_color_obucavanje = my.select_roiV3(image_original_obucavanje.copy(), image_obucavanje)
+
+inputs_obucavanje = prepare_for_ann(letters)
+
+print 'ovdefdasfffffffffffffffffffffffffffffffffffffdasfsdffas'
+signs_alphabet = ['pet', 'deset','5najst','2deset','zSmer', 'stop']
+outputs_obucavanje = convert_output(signs_alphabet)
+
+print '\nlen(inputs_obucavanje)=', len(inputs_obucavanje), ' len(outputs_obucavanje)=', len(outputs_obucavanje)
+ann = create_ann()
+ann = train_ann(ann, inputs_obucavanje, outputs_obucavanje)
+
+print 'after train'
+
+# predikcija na osnovu obucene neuronske mreze
+image_test_original = load_image('C:\Users\sbstb\Desktop\sm.jpg')
+
+width,height= image_test_original.shape[0:2]
+
+
+image_test_temp=image_test_original.copy()
+image_test = remove_noise(image_bin(image_gray(image_test_temp)))
+plt.figure(30)
+display_image(image_test_original,"Original")
+plt.figure(31)
+display_image(image_test_temp,"Procesuirana")
+plt.figure(32)
+display_image(image_test,"image test")
+
+
+image_test_hsv=image_test_original.copy()
+
+hsv = cv2.cvtColor(image_test_hsv, cv2.COLOR_BGR2HSV)
+
+black = np.uint8([[[0,0,0 ]]])
+hsv_black = cv2.cvtColor(black,cv2.COLOR_BGR2HSV)
+print hsv_black, 'ovo je black kolor value'
+
+lower_black1=np.array([0,0,0])
+upper_black1=np.array([40,255,255])
+
+    # define range of blue color in HSV
+lower_blue = np.array([110,50,50])
+upper_blue = np.array([130,255,255])
+
+    # Threshold the HSV image to get only red colors
+mask1 = cv2.inRange(hsv, lower_blue, upper_blue)
+#mask2 = cv2.inRange(hsv_black,lower_black1,upper_black1)
+
+mask=mask1
+
+    # Bitwise-AND mask and original image
+res = cv2.bitwise_and(image_test_hsv,image_test_hsv, mask= mask)
+
+plt.figure(33)
+
+display_image(mask,"res")
+
+#print "greeeeeeeeeeeeeen"
+
+red = np.uint8([[[255,0,0 ]]])
+
+hsv_red = cv2.cvtColor(red,cv2.COLOR_BGR2HSV)
+
+#print hsv_red
+
+
+selected_regions, signs_test,colorRegions =select_roi3(image_test_original.copy(),mask)
+
+plt.figure(44)
+display_image(selected_regions,"regioni")
+
+j=45
+k=0
+for letter in colorRegions:
+    plt.figure(j)
+    #print letter
+    
+    k+=1
+    display_image(letter,"region"+str(k))
+    j+=1
+
+shape=0
+
+
+#selected_regions_test, signs_test, region_distances_test, regions_color_test = my.select_roiV3(image_test_original.copy(), image_test)
+
+inputs_test = prepare_for_ann(signs_test)
+results_test = ann.predict(np.array(inputs_test, np.float32))
+print display_result_ann(results_test, signs_alphabet)
+print '\nresults_test=', results_test
+
+
+# /-/-/-/-
+
+#print "distancesssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+#print len(distances)
+#print len(letters[0])
+
+
+
+
+
